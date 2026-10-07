@@ -6,6 +6,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
 :root{--bg:#f1f4f6;--card:#fff;--ink:#0f1c2e;--mute:#5b6b7d;--line:#d9e0e6;--acc:#0f6b66;--red:#b42318;--amb:#a15c07;--grn:#19704a}
 *{box-sizing:border-box;margin:0}
@@ -149,6 +150,7 @@ th.s{cursor:pointer}th.s:hover{color:var(--acc)}
       <div class="card"><h3>Status overview</h3><div class="ch"><canvas id="c1"></canvas></div></div>
       <div class="card"><h3>Late and absent by department</h3><div class="ch"><canvas id="c2"></canvas></div></div>
     </div>
+    <div class="card" style="margin-bottom:12px"><h3>Arrival time distribution</h3><div class="ch"><canvas id="c3"></canvas></div></div>
     <div class="card" style="margin-bottom:12px"><h3>Department summary</h3><div class="scroll" style="max-height:260px"><table><thead><tr><th>Department</th><th>Total</th><th>Present</th><th>Late</th><th>Absent</th><th>Attendance</th></tr></thead><tbody id="dsum"></tbody></table></div></div>
     <div class="warn hide" id="warn"></div>
     <div class="row" style="margin-bottom:12px">
@@ -287,7 +289,7 @@ function mAddMissing(){
 function mClear(){if(confirm('Sabhi employee-wise timings hatane hain?')){master={};mSave()}}
 
 /* ---------- Read report ---------- */
-let rows=[],flt='all',meta='',sk='',sd=1,ch1,ch2;
+let rows=[],flt='all',meta='',sk='',sd=1,ch1,ch2,ch3;
 function load(e){
   const f=e.target.files[0];if(!f)return;$('fname').textContent=f.name;
   const rd=new FileReader();
@@ -359,11 +361,19 @@ function summary(all){
 }
 function charts(all,ds){
   if(!window.Chart)return;
-  const dk=document.documentElement.dataset.theme==='dark',tc=dk?'#8b9bad':'#5b6b7d',gc=dk?'#243445':'#e3e8ec',n=k=>all.filter(r=>r.st===k).length;
-  ch1&&ch1.destroy();ch2&&ch2.destroy();
-  ch1=new Chart($('c1'),{type:'doughnut',data:{labels:['On time','Late','Absent'],datasets:[{data:[n('ontime'),n('late'),n('absent')],backgroundColor:['#19704a','#d98a1c','#b42318'],borderWidth:0}]},options:{maintainAspectRatio:false,cutout:'65%',plugins:{legend:{position:'bottom',labels:{color:tc}}},animation:{duration:1100}}});
-  const t=ds.slice().sort((a,b)=>b[1].l+b[1].a-a[1].l-a[1].a).slice(0,10);
-  ch2=new Chart($('c2'),{type:'bar',data:{labels:t.map(x=>x[0]),datasets:[{label:'Late',data:t.map(x=>x[1].l),backgroundColor:'#d98a1c',borderRadius:4},{label:'Absent',data:t.map(x=>x[1].a),backgroundColor:'#b42318',borderRadius:4}]},options:{maintainAspectRatio:false,plugins:{legend:{labels:{color:tc}}},scales:{x:{stacked:true,ticks:{color:tc},grid:{display:false}},y:{stacked:true,beginAtZero:true,ticks:{color:tc,precision:0},grid:{color:gc}}},animation:{duration:1100}}});
+  const dk=document.documentElement.dataset.theme==='dark',tc=dk?'#9fb0c2':'#5b6b7d',gc=dk?'#243445':'#e3e8ec',bg=dk?'#142130':'#fff',n=k=>all.filter(r=>r.st===k).length;
+  const G='#22a35a',A='#f5a524',R='#ef4444';
+  const pct=Math.round((all.length-n('absent'))/all.length*100);
+  const ctr={id:'ctr',afterDraw(c){const a=c.chartArea,x=(a.left+a.right)/2,y=(a.top+a.bottom)/2,g=c.ctx;g.save();g.textAlign='center';g.fillStyle=dk?'#e6edf3':'#0f1c2e';g.font='600 28px "Source Serif 4",Georgia,serif';g.fillText(pct+'%',x,y+6);g.fillStyle=tc;g.font='12px Inter,sans-serif';g.fillText('present',x,y+24);g.restore()}};
+  [ch1,ch2,ch3].forEach(c=>c&&c.destroy());
+  ch1=new Chart($('c1'),{type:'doughnut',plugins:[ctr],data:{labels:['On time ('+n('ontime')+')','Late ('+n('late')+')','Absent ('+n('absent')+')'],datasets:[{data:[n('ontime'),n('late'),n('absent')],backgroundColor:[G,A,R],borderColor:bg,borderWidth:3,hoverOffset:8}]},options:{maintainAspectRatio:false,cutout:'68%',plugins:{legend:{position:'bottom',labels:{color:tc,usePointStyle:true,padding:14}}},animation:{duration:1200}}});
+  const D={};all.forEach(r=>{const x=D[r.dept]=D[r.dept]||[0,0,0];x[r.st==='ontime'?0:r.st==='late'?1:2]++});
+  const t=Object.entries(D).sort((a,b)=>(b[1][0]+b[1][1]+b[1][2])-(a[1][0]+a[1][1]+a[1][2])).slice(0,12);
+  const ds2=(l,i,c)=>({label:l,data:t.map(x=>x[1][i]),backgroundColor:c,borderRadius:3});
+  ch2=new Chart($('c2'),{type:'bar',data:{labels:t.map(x=>x[0]),datasets:[ds2('On time',0,G),ds2('Late',1,A),ds2('Absent',2,R)]},options:{maintainAspectRatio:false,plugins:{legend:{labels:{color:tc,usePointStyle:true}}},scales:{x:{stacked:true,ticks:{color:tc},grid:{display:false}},y:{stacked:true,beginAtZero:true,ticks:{color:tc,precision:0},grid:{color:gc}}},animation:{duration:1200}}});
+  const L=['Before 7:00','7:00','7:30','8:00','8:30','9:00','9:30','10:00','10:30','11:00+'],B=L.map(()=>0);
+  all.forEach(r=>{if(r.inM!=null)B[r.inM<420?0:Math.min(Math.floor((r.inM-420)/30)+1,9)]++});
+  ch3=new Chart($('c3'),{type:'bar',data:{labels:L,datasets:[{label:'Employees',data:B,backgroundColor:['#38bdf8','#22d3ee','#14b8a6','#22c55e','#84cc16','#eab308','#f59e0b','#f97316','#ef4444','#dc2626'],borderRadius:5}]},options:{maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:tc},grid:{display:false}},y:{beginAtZero:true,ticks:{color:tc,precision:0},grid:{color:gc}}},animation:{duration:1200}}});
 }
 function theme(){const d=document.documentElement,dk=d.dataset.theme!=='dark';d.dataset.theme=dk?'dark':'';$('tbtn').textContent=dk?'Light':'Dark';LS('ap_theme',dk?'dark':'');if(rows.length)draw()}
 function hist(add){
@@ -371,15 +381,25 @@ function hist(add){
   $('hist').innerHTML=h.map(x=>`<div class="row" style="justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line)"><span>${esc(x.f)}</span><span class="sub">${esc(x.d)} · ${x.t} employees · ${x.l} late · ${x.a} absent</span></div>`).join('')||'<span class="sub">Abhi koi upload nahi</span>';
 }
 function pdf(){
-  const J=window.jspdf;if(!J)return toast('PDF library load nahi hui');
-  const all=rows.map(calc),late=all.filter(r=>r.st==='late').sort((a,b)=>b.by-a.by),abs=all.filter(r=>r.st==='absent');
-  const d=new J.jsPDF('p','mm','a4');let y=38;
-  d.setFillColor(15,107,102);d.rect(0,0,210,28,'F');d.setTextColor(255);d.setFontSize(17);d.text('Panchhi Fashion - Attendance Report',14,13);d.setFontSize(10);d.text(meta||new Date().toLocaleDateString('en-IN'),14,21);
-  d.setTextColor(30);d.setFontSize(11);d.text(`Total ${all.length}   Present ${all.length-abs.length}   Late ${late.length}   Absent ${abs.length}`,14,y);y+=10;d.setFontSize(10);
-  const line=(t,b)=>{if(y>280){d.addPage();y=18}d.setFont('helvetica',b?'bold':'normal');d.text(t,14,y);y+=6};
-  line('Late list',1);late.forEach((r,i)=>line(`${i+1}. ${r.name} (${r.id})  in ${fm(r.inM)}  ${lt(r.by)} late`));
-  y+=4;line('Absent list',1);abs.forEach((r,i)=>line(`${i+1}. ${r.name} (${r.id})`));
-  y+=6;d.setTextColor(120);line('Crafted by Aditya Tomar');
+  const J=window.jspdf;if(!J||!J.jsPDF.API.autoTable)return toast('PDF library load nahi hui');
+  const all=rows.map(calc),late=all.filter(r=>r.st==='late').sort((a,b)=>b.by-a.by),abs=all.filter(r=>r.st==='absent'),pres=all.length-abs.length;
+  const d=new J.jsPDF('p','mm','a4'),W=210,teal=[15,107,102];
+  d.setFillColor(...teal);d.rect(0,0,W,30,'F');d.setTextColor(255);d.setFont('helvetica','bold');d.setFontSize(18);d.text('Panchhi Fashion',14,13);
+  d.setFont('helvetica','normal');d.setFontSize(11);d.text('Daily Attendance Report',14,22);d.text(meta||new Date().toLocaleDateString('en-IN'),W-14,22,{align:'right'});
+  [['Total',all.length,[15,28,46]],['Present',pres,[25,112,74]],['Late',late.length,[217,138,28]],['Absent',abs.length,[180,35,24]],['Attendance',Math.round(pres/all.length*100)+'%',teal]].forEach(([l,v,c],i)=>{
+    const x=14+i*37;d.setDrawColor(217,224,230);d.roundedRect(x,38,34,20,2,2);d.setTextColor(...c);d.setFont('helvetica','bold');d.setFontSize(16);d.text(String(v),x+17,49,{align:'center'});
+    d.setTextColor(91,107,125);d.setFont('helvetica','normal');d.setFontSize(8);d.text(l,x+17,54.5,{align:'center'})});
+  const tbl=(title,head,body,col)=>{
+    let y=(d.lastAutoTable?d.lastAutoTable.finalY:58)+10;if(y>255){d.addPage();y=20}
+    d.setTextColor(15,28,46);d.setFont('helvetica','bold');d.setFontSize(12);d.text(title,14,y);
+    d.autoTable({startY:y+3,head:[head],body:body.length?body:[head.map(()=>'-')],margin:{left:14,right:14,bottom:18},styles:{fontSize:9,cellPadding:2.2,textColor:[15,28,46]},headStyles:{fillColor:col,textColor:255},alternateRowStyles:{fillColor:[244,247,249]}});
+  };
+  const D={};all.forEach(r=>{const x=D[r.dept]=D[r.dept]||[0,0,0,0];x[0]++;if(r.st==='absent')x[3]++;else x[1]++;if(r.st==='late')x[2]++});
+  tbl('Department summary',['Department','Total','Present','Late','Absent','Attendance'],Object.entries(D).sort((a,b)=>b[1][0]-a[1][0]).map(([k,x])=>[k,x[0],x[1],x[2],x[3],Math.round(x[1]/x[0]*100)+'%']),teal);
+  tbl('Late list ('+late.length+')',['#','ECode','Name','Shift','Start','In time','Late by'],late.map((r,i)=>[i+1,r.id,r.name,r.shift,fm(r.s),fm(r.inM),lt(r.by)]),[217,138,28]);
+  tbl('Absent list ('+abs.length+')',['#','ECode','Name','Dept','Shift'],abs.map((r,i)=>[i+1,r.id,r.name,r.dept,r.shift]),[180,35,24]);
+  const n=d.getNumberOfPages();
+  for(let i=1;i<=n;i++){d.setPage(i);d.setFontSize(8);d.setTextColor(120);d.setFont('helvetica','normal');d.text('Crafted by Aditya Tomar - Attendance Pro',14,289);d.text('Page '+i+' of '+n,W-14,289,{align:'right'})}
   d.save('Attendance_'+(meta||'report').replace(/[\/ ]/g,'-')+'.pdf');
 }
 function setF(b){flt=b.dataset.f;document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c===b));draw()}
