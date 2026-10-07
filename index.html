@@ -5,9 +5,9 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:wght@500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
-:root{--bg:#faf9f5;--card:#fff;--ink:#1f1e1d;--mute:#6b6a68;--line:#e6e3d8;--acc:#b85c38;--red:#b3261e;--amb:#9a6700;--grn:#2e7d4f}
+:root{--bg:#f1f4f6;--card:#fff;--ink:#0f1c2e;--mute:#5b6b7d;--line:#d9e0e6;--acc:#0f6b66;--red:#b42318;--amb:#a15c07;--grn:#19704a}
 *{box-sizing:border-box;margin:0}
-body{font:14px/1.5 Inter,system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+body{border-top:4px solid var(--acc);font:14px/1.5 Inter,system-ui,sans-serif;background:var(--bg);color:var(--ink)}
 h1,h2{font-family:'Source Serif 4',Georgia,serif;font-weight:600}
 h1{font-size:26px}h2{font-size:18px;margin-bottom:8px}
 .wrap{max-width:1000px;margin:0 auto;padding:24px 16px 60px}
@@ -32,8 +32,8 @@ th{font-weight:600;color:var(--mute);font-size:12.5px}
 .drop:hover{border-color:var(--acc)}
 .drop input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}
-.stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
-.stat b{display:block;font:600 24px 'Source Serif 4',Georgia,serif}
+.stat{background:var(--card);border:1px solid var(--line);border-top:3px solid var(--acc);border-radius:10px;padding:12px 14px}
+.stat b{display:block;color:var(--acc);font:600 24px 'Source Serif 4',Georgia,serif}
 .stat span{color:var(--mute);font-size:12.5px}
 .warn{background:#fdf6e3;border:1px solid #ecdca8;color:#6b5200;border-radius:8px;padding:9px 12px;margin-bottom:12px;font-size:13px}
 .chip{border-radius:20px;padding:5px 12px}.chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
@@ -142,7 +142,7 @@ th{font-weight:600;color:var(--mute);font-size:12.5px}
 
 <script>
 // Google Apps Script web app URL yahan paste karo (setup ke baad). Khali rahe to data sirf is browser mein save hoga.
-const CLOUD_URL='https://script.google.com/macros/s/AKfycbwo4JxHbdxeNCsB89ytPU5K52HPxZT66nDoRvRW-5nIJKzFQ1YLqC8Xuc7t6LKC5NDB/exec';
+const CLOUD_URL='';
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const LS=(k,v)=>{try{if(v===undefined)return JSON.parse(localStorage.getItem(k));localStorage.setItem(k,JSON.stringify(v));return true}catch(e){return null}};
@@ -292,7 +292,8 @@ function calc(r){
   if(r.inM!=null){by=r.inM-s;st=r.inM>s+(+ru.grace||0)?'late':'ontime'}
   return {...r,s,src,by,st,grace:+ru.grace||0};
 }
-const label=r=>r.st==='absent'?'Absent':r.st==='late'?`Late ${r.by} min`:'On time';
+const lt=m=>m<60?'00:'+String(m).padStart(2,'0')+' mins':Math.floor(m/60)+':'+String(m%60).padStart(2,'0')+' hours';
+const label=r=>r.st==='absent'?'Absent':r.st==='late'?lt(r.by)+' late':'On time';
 function draw(){
   const all=rows.map(calc);
   const late=all.filter(r=>r.st==='late').length,abs=all.filter(r=>r.st==='absent').length;
@@ -319,7 +320,7 @@ function dl(fmt){
 function lateText(){
   const all=rows.map(calc),l=all.filter(r=>r.st==='late').sort((a,b)=>b.by-a.by);
   let t=`Late coming report${meta?' — '+meta:''}\nTotal ${all.length} | Late ${l.length} | Absent ${all.filter(r=>r.st==='absent').length}\n\n`;
-  l.forEach((r,i)=>t+=`${i+1}. ${r.name} (${r.id}) — ${fm(r.inM)}, ${r.by} min late\n`);
+  l.forEach((r,i)=>t+=`${i+1}. ${r.name} (${r.id}) — ${fm(r.inM)}, ${lt(r.by)} late\n`);
   return t;
 }
 function copyLate(){navigator.clipboard.writeText(lateText()).then(()=>toast('Late list copy ho gayi'),()=>toast('Copy nahi hua'))}
