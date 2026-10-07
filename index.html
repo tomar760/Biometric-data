@@ -4,6 +4,8 @@
 <title>Attendance — Panchhi Fashion</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:wght@500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 :root{--bg:#f1f4f6;--card:#fff;--ink:#0f1c2e;--mute:#5b6b7d;--line:#d9e0e6;--acc:#0f6b66;--red:#b42318;--amb:#a15c07;--grn:#19704a}
 *{box-sizing:border-box;margin:0}
@@ -44,7 +46,25 @@ th{font-weight:600;color:var(--mute);font-size:12.5px}
 .err{color:var(--red);font-size:13px;min-height:20px;margin-top:6px}
 #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:9px 18px;border-radius:8px;opacity:0;transition:.3s;pointer-events:none}
 #toast.on{opacity:1}
-@media(max-width:640px){.stats{grid-template-columns:repeat(2,1fr)}}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.sum{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;transition:.25s}
+.card h3{font:600 14px Inter,sans-serif;margin-bottom:8px}
+.big{display:block;font:600 22px 'Source Serif 4',Georgia,serif;color:var(--acc);margin-top:2px}
+.ch{position:relative;height:210px}
+.stat{transition:.25s}.card:hover,.stat:hover{transform:translateY(-3px);box-shadow:0 8px 20px rgba(15,28,46,.1)}
+.bar{height:8px;background:var(--line);border-radius:6px;overflow:hidden;margin-top:8px}
+.bar i{display:block;height:100%;width:0;background:var(--acc);transition:width 1.1s cubic-bezier(.2,.8,.2,1)}
+tr.in{animation:rin .35s both}@keyframes rin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+th.s{cursor:pointer}th.s:hover{color:var(--acc)}
+.foot{text-align:center;color:var(--mute);font-size:13px;margin-top:36px;line-height:1.9}
+.foot b{font:600 18px 'Source Serif 4',Georgia,serif;background:linear-gradient(90deg,var(--acc),#d98a1c,var(--acc));background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:shine 4s linear infinite}
+@keyframes shine{to{background-position:200% 0}}
+[data-theme=dark]{--bg:#0c1520;--card:#142130;--ink:#e6edf3;--mute:#8b9bad;--line:#243445;--acc:#2bb3aa}
+[data-theme=dark] input,[data-theme=dark] select{background:#0c1520}
+[data-theme=dark] .chip.on{color:#0c1520}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media(max-width:640px){.stats,.sum{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}}
 </style></head><body>
 
 <div id="lock"><div class="box">
@@ -61,6 +81,7 @@ th{font-weight:600;color:var(--mute);font-size:12.5px}
       <button onclick="tog('mBox')">Employee timings</button>
       <button onclick="tog('rulesBox')">Shift timings</button>
       <button onclick="tog('pinBox')">Change PIN</button>
+      <button onclick="theme()" id="tbtn">Dark</button>
       <button onclick="location.reload()">Lock</button>
     </div>
   </div>
@@ -118,6 +139,17 @@ th{font-weight:600;color:var(--mute);font-size:12.5px}
       <div class="stat"><b id="sL">0</b><span>Late</span></div>
       <div class="stat"><b id="sA">0</b><span>Absent</span></div>
     </div>
+    <div class="sum">
+      <div class="card"><span class="sub">Attendance</span><b class="big" id="xPct">0%</b><div class="bar"><i id="xBar"></i></div></div>
+      <div class="card"><span class="sub">Average late</span><b class="big" id="xAvg">—</b></div>
+      <div class="card"><span class="sub">Most late</span><b class="big" id="xMax">—</b><span class="sub" id="xWho"></span></div>
+      <div class="card"><span class="sub">Most late department</span><b class="big" id="xDep">—</b><span class="sub" id="xDepN"></span></div>
+    </div>
+    <div class="grid2">
+      <div class="card"><h3>Status overview</h3><div class="ch"><canvas id="c1"></canvas></div></div>
+      <div class="card"><h3>Late and absent by department</h3><div class="ch"><canvas id="c2"></canvas></div></div>
+    </div>
+    <div class="card" style="margin-bottom:12px"><h3>Department summary</h3><div class="scroll" style="max-height:260px"><table><thead><tr><th>Department</th><th>Total</th><th>Present</th><th>Late</th><th>Absent</th><th>Attendance</th></tr></thead><tbody id="dsum"></tbody></table></div></div>
     <div class="warn hide" id="warn"></div>
     <div class="row" style="margin-bottom:12px">
       <input id="q" placeholder="Search name or ECode" oninput="draw()" style="flex:1;min-width:160px">
@@ -128,15 +160,18 @@ th{font-weight:600;color:var(--mute);font-size:12.5px}
       <button class="chip" data-f="ontime" onclick="setF(this)">On time</button>
     </div>
     <div class="box" style="padding:0"><div class="scroll"><table>
-      <thead><tr><th>#</th><th>ECode</th><th>Name</th><th>Shift</th><th>Start</th><th>In time</th><th>Status</th></tr></thead>
+      <thead><tr><th>#</th><th class="s" onclick="srt('id')">ECode</th><th class="s" onclick="srt('name')">Name</th><th class="s" onclick="srt('shift')">Shift</th><th class="s" onclick="srt('s')">Start</th><th class="s" onclick="srt('inM')">In time</th><th class="s" onclick="srt('st')">Status</th></tr></thead>
       <tbody id="tb"></tbody></table></div></div>
     <div class="row">
       <button class="p" onclick="dl('xlsx')">Download XLSX</button>
       <button onclick="dl('csv')">Download CSV</button>
+      <button onclick="pdf()">Download PDF</button>
       <button onclick="copyLate()">Copy late list</button>
       <button onclick="wa()">Share on WhatsApp</button>
     </div>
   </div>
+<div class="box" style="margin-top:16px"><h2>Recent uploads</h2><div id="hist"></div></div>
+  <div class="foot">Made in India with care · crafted by <b>Aditya Tomar</b><br>House of Panchhi · Attendance Pro</div>
 </div>
 <div id="toast"></div>
 
@@ -252,7 +287,7 @@ function mAddMissing(){
 function mClear(){if(confirm('Sabhi employee-wise timings hatane hain?')){master={};mSave()}}
 
 /* ---------- Read report ---------- */
-let rows=[],flt='all',meta='';
+let rows=[],flt='all',meta='',sk='',sd=1,ch1,ch2;
 function load(e){
   const f=e.target.files[0];if(!f)return;$('fname').textContent=f.name;
   const rd=new FileReader();
@@ -281,6 +316,7 @@ function parse(wb){
   const ds=[...new Set(rows.map(r=>r.dept))].sort();
   $('dep').innerHTML='<option value="">All departments</option>'+ds.map(d=>`<option>${esc(d)}</option>`).join('');
   $('out').classList.remove('hide');draw();
+  const c=rows.map(calc);hist({f:$('fname').textContent,d:meta,t:c.length,l:c.filter(r=>r.st==='late').length,a:c.filter(r=>r.st==='absent').length});
 }
 
 /* ---------- Calculate ---------- */
@@ -297,14 +333,54 @@ const label=r=>r.st==='absent'?'Absent':r.st==='late'?lt(r.by)+' late':'On time'
 function draw(){
   const all=rows.map(calc);
   const late=all.filter(r=>r.st==='late').length,abs=all.filter(r=>r.st==='absent').length;
-  $('sT').textContent=all.length;$('sP').textContent=all.length-abs;$('sL').textContent=late;$('sA').textContent=abs;
+  cnt('sT',all.length);cnt('sP',all.length-abs);cnt('sL',late);cnt('sA',abs);summary(all);
   $('meta').textContent=(meta?'Report date: '+meta+' · ':'')+all.length+' employees';
   const miss=[...new Set(all.filter(r=>r.src==='DEFAULT').map(r=>r.dept+'/'+r.shift))];
   const w=$('warn');
   if(miss.length){w.classList.remove('hide');w.textContent='In ka timing set nahi hai, isliye DEFAULT lag raha hai: '+miss.join(', ')+'. "Shift timings" mein add kar do.'}else w.classList.add('hide');
   const q=$('q').value.toLowerCase().trim(),dp=$('dep').value;
   const v=all.filter(r=>(flt==='all'||r.st===flt)&&(!dp||r.dept===dp)&&(!q||r.id.toLowerCase().includes(q)||r.name.toLowerCase().includes(q)));
-  $('tb').innerHTML=v.length?v.map((r,i)=>`<tr><td>${i+1}</td><td>${esc(r.id)}</td><td>${esc(r.name)}</td><td>${esc(r.shift)}</td><td>${fm(r.s)}</td><td>${r.inM==null?'—':fm(r.inM)}</td><td class="${r.st==='late'?'late':r.st==='absent'?'abs':'ok'}">${label(r)}</td></tr>`).join(''):'<tr><td colspan="7" class="sub" style="text-align:center;padding:30px">Kuch nahi mila</td></tr>';
+  if(sk)v.sort((a,b)=>{const g=r=>sk==='st'?(r.st==='absent'?-1:r.by):r[sk];const x=g(a),y=g(b);return(x>y?1:x<y?-1:0)*sd});
+  $('tb').innerHTML=v.length?v.map((r,i)=>`<tr class="in" style="animation-delay:${Math.min(i,15)*25}ms"><td>${i+1}</td><td>${esc(r.id)}</td><td>${esc(r.name)}</td><td>${esc(r.shift)}</td><td>${fm(r.s)}</td><td>${r.inM==null?'—':fm(r.inM)}</td><td class="${r.st==='late'?'late':r.st==='absent'?'abs':'ok'}">${label(r)}</td></tr>`).join(''):'<tr><td colspan="7" class="sub" style="text-align:center;padding:30px">Kuch nahi mila</td></tr>';
+}
+function srt(k){sd=sk===k?-sd:1;sk=k;draw()}
+function cnt(id,v){const e=$(id),t0=performance.now();(function f(t){const k=Math.min((t-t0)/700,1);e.textContent=Math.round(v*(1-Math.pow(1-k,3)));if(k<1)requestAnimationFrame(f)})(t0)}
+function summary(all){
+  const late=all.filter(r=>r.st==='late'),pres=all.length-all.filter(r=>r.st==='absent').length,pct=Math.round(pres/all.length*100);
+  $('xPct').textContent=pct+'%';setTimeout(()=>{$('xBar').style.width=pct+'%'},50);
+  $('xAvg').textContent=late.length?lt(Math.round(late.reduce((a,r)=>a+r.by,0)/late.length)):'—';
+  const mx=late.reduce((a,r)=>!a||r.by>a.by?r:a,null);
+  $('xMax').textContent=mx?lt(mx.by):'—';$('xWho').textContent=mx?mx.name:'';
+  const D={};all.forEach(r=>{const d=D[r.dept]=D[r.dept]||{t:0,p:0,l:0,a:0};d.t++;r.st==='absent'?d.a++:d.p++;if(r.st==='late')d.l++});
+  const ds=Object.entries(D).sort((a,b)=>b[1].l-a[1].l),top=ds[0]&&ds[0][1].l?ds[0]:null;
+  $('xDep').textContent=top?top[0]:'—';$('xDepN').textContent=top?top[1].l+' late':'';
+  $('dsum').innerHTML=ds.map(([k,d])=>`<tr><td>${esc(k)}</td><td>${d.t}</td><td>${d.p}</td><td class="late">${d.l}</td><td class="abs">${d.a}</td><td>${Math.round(d.p/d.t*100)}%</td></tr>`).join('');
+  charts(all,ds);
+}
+function charts(all,ds){
+  if(!window.Chart)return;
+  const dk=document.documentElement.dataset.theme==='dark',tc=dk?'#8b9bad':'#5b6b7d',gc=dk?'#243445':'#e3e8ec',n=k=>all.filter(r=>r.st===k).length;
+  ch1&&ch1.destroy();ch2&&ch2.destroy();
+  ch1=new Chart($('c1'),{type:'doughnut',data:{labels:['On time','Late','Absent'],datasets:[{data:[n('ontime'),n('late'),n('absent')],backgroundColor:['#19704a','#d98a1c','#b42318'],borderWidth:0}]},options:{maintainAspectRatio:false,cutout:'65%',plugins:{legend:{position:'bottom',labels:{color:tc}}},animation:{duration:1100}}});
+  const t=ds.slice().sort((a,b)=>b[1].l+b[1].a-a[1].l-a[1].a).slice(0,10);
+  ch2=new Chart($('c2'),{type:'bar',data:{labels:t.map(x=>x[0]),datasets:[{label:'Late',data:t.map(x=>x[1].l),backgroundColor:'#d98a1c',borderRadius:4},{label:'Absent',data:t.map(x=>x[1].a),backgroundColor:'#b42318',borderRadius:4}]},options:{maintainAspectRatio:false,plugins:{legend:{labels:{color:tc}}},scales:{x:{stacked:true,ticks:{color:tc},grid:{display:false}},y:{stacked:true,beginAtZero:true,ticks:{color:tc,precision:0},grid:{color:gc}}},animation:{duration:1100}}});
+}
+function theme(){const d=document.documentElement,dk=d.dataset.theme!=='dark';d.dataset.theme=dk?'dark':'';$('tbtn').textContent=dk?'Light':'Dark';LS('ap_theme',dk?'dark':'');if(rows.length)draw()}
+function hist(add){
+  let h=LS('ap_hist')||[];if(add){h.unshift(add);h=h.slice(0,8);LS('ap_hist',h)}
+  $('hist').innerHTML=h.map(x=>`<div class="row" style="justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line)"><span>${esc(x.f)}</span><span class="sub">${esc(x.d)} · ${x.t} employees · ${x.l} late · ${x.a} absent</span></div>`).join('')||'<span class="sub">Abhi koi upload nahi</span>';
+}
+function pdf(){
+  const J=window.jspdf;if(!J)return toast('PDF library load nahi hui');
+  const all=rows.map(calc),late=all.filter(r=>r.st==='late').sort((a,b)=>b.by-a.by),abs=all.filter(r=>r.st==='absent');
+  const d=new J.jsPDF('p','mm','a4');let y=38;
+  d.setFillColor(15,107,102);d.rect(0,0,210,28,'F');d.setTextColor(255);d.setFontSize(17);d.text('Panchhi Fashion - Attendance Report',14,13);d.setFontSize(10);d.text(meta||new Date().toLocaleDateString('en-IN'),14,21);
+  d.setTextColor(30);d.setFontSize(11);d.text(`Total ${all.length}   Present ${all.length-abs.length}   Late ${late.length}   Absent ${abs.length}`,14,y);y+=10;d.setFontSize(10);
+  const line=(t,b)=>{if(y>280){d.addPage();y=18}d.setFont('helvetica',b?'bold':'normal');d.text(t,14,y);y+=6};
+  line('Late list',1);late.forEach((r,i)=>line(`${i+1}. ${r.name} (${r.id})  in ${fm(r.inM)}  ${lt(r.by)} late`));
+  y+=4;line('Absent list',1);abs.forEach((r,i)=>line(`${i+1}. ${r.name} (${r.id})`));
+  y+=6;d.setTextColor(120);line('Crafted by Aditya Tomar');
+  d.save('Attendance_'+(meta||'report').replace(/[\/ ]/g,'-')+'.pdf');
 }
 function setF(b){flt=b.dataset.f;document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c===b));draw()}
 
@@ -326,5 +402,6 @@ function lateText(){
 function copyLate(){navigator.clipboard.writeText(lateText()).then(()=>toast('Late list copy ho gayi'),()=>toast('Copy nahi hua'))}
 function wa(){window.open('https://wa.me/?text='+encodeURIComponent(lateText()),'_blank')}
 
-drawRules();mcount();
+drawRules();mcount();hist();
+if(LS('ap_theme')==='dark'){document.documentElement.dataset.theme='dark';$('tbtn').textContent='Light'}
 </script></body></html>
