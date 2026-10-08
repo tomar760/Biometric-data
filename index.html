@@ -156,6 +156,7 @@ a{color:var(--acc);text-decoration:none;font-weight:500}a:hover{text-decoration:
     </div>
     <div class="card" style="margin-bottom:12px"><h3>Arrival time distribution</h3><div class="ch"><canvas id="c3"></canvas></div></div>
     <div class="card" style="margin-bottom:12px"><h3>Department summary</h3><div class="scroll" style="max-height:260px"><table><thead><tr><th>Department</th><th>Total</th><th>Present</th><th>Late</th><th>Absent</th><th>Attendance</th></tr></thead><tbody id="dsum"></tbody></table></div></div>
+    <div class="card" style="margin-bottom:12px"><h3>Repeat latecomers <span class="sub" id="rpN"></span></h3><div id="rp"></div><p class="sub" style="margin-top:6px">Ye data sirf is browser ki uploads se banta hai.</p></div>
     <div class="warn hide" id="warn"></div>
     <div class="row" style="margin-bottom:12px">
       <input id="q" placeholder="Search name or ECode" oninput="draw()" style="flex:1;min-width:160px">
@@ -166,30 +167,32 @@ a{color:var(--acc);text-decoration:none;font-weight:500}a:hover{text-decoration:
       <button class="chip" data-f="ontime" onclick="setF(this)">On time</button>
     </div>
     <div class="box" style="padding:0"><div class="scroll"><table>
-      <thead><tr><th>#</th><th class="s" onclick="srt('id')">ECode</th><th class="s" onclick="srt('name')">Name</th><th class="s" onclick="srt('shift')">Shift</th><th class="s" onclick="srt('s')">Start</th><th class="s" onclick="srt('inM')">In time</th><th class="s" onclick="srt('st')">Status</th><th>Phone</th><th>HOD</th></tr></thead>
+      <thead><tr><th>#</th><th class="s" onclick="srt('id')">ECode</th><th class="s" onclick="srt('name')">Name</th><th class="s" onclick="srt('shift')">Shift</th><th class="s" onclick="srt('s')">Start</th><th class="s" onclick="srt('inM')">In time</th><th class="s" onclick="srt('st')">Status</th><th>Phone</th><th>HOD</th><th>Reason</th></tr></thead>
       <tbody id="tb"></tbody></table></div></div>
     <div class="row">
       <button class="p" onclick="dl('xlsx')">Download XLSX</button>
       <button onclick="dl('csv')">Download CSV</button>
       <button onclick="pdf()">Download PDF</button>
       <button onclick="copyLate()">Copy late list</button>
+      <button onclick="copyAbs()">Copy absent list</button>
+      <button onclick="clearReport()">Clear report</button>
       <button onclick="wa()">Share on WhatsApp</button>
     </div>
   </div>
-<div class="box" style="margin-top:16px"><h2>Recent uploads</h2><div id="hist"></div></div>
+<div class="box" style="margin-top:16px"><div class="row" style="justify-content:space-between"><h2>Recent uploads</h2><button onclick="clearHist()">Clear history</button></div><div id="hist"></div></div>
   <div class="foot">Made in India with care · crafted by <b>Aditya Tomar</b><br>House of Panchhi · Attendance Pro</div>
 </div>
 <div id="toast"></div>
 
 <script>
 // Google Apps Script web app URL yahan paste karo (setup ke baad). Khali rahe to data sirf is browser mein save hoga.
-const CLOUD_URL='https://script.google.com/macros/s/AKfycbwo4JxHbdxeNCsB89ytPU5K52HPxZT66nDoRvRW-5nIJKzFQ1YLqC8Xuc7t6LKC5NDB/exec';
+const CLOUD_URL='';
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const LS=(k,v)=>{try{if(v===undefined)return JSON.parse(localStorage.getItem(k));localStorage.setItem(k,JSON.stringify(v));return true}catch(e){return null}};
 const fm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
 const toM=t=>{const m=String(t||'').match(/(\d{1,2}):(\d{2})/);return m?+m[1]*60+ +m[2]:null};
-function toast(t){const e=$('toast');e.textContent=t;e.classList.add('on');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('on'),2800)}
+function toast(t,ms){const e=$('toast');e.textContent=t;e.classList.add('on');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('on'),ms||2800)}
 function tog(id){$(id).classList.toggle('hide')}
 
 /* ---------- PIN (default 1122, stored as hash in this browser) ---------- */
@@ -202,7 +205,7 @@ async function cloud(post,body){
 }
 async function cloudSave(part){
   if(!CLOUD_URL)return true;
-  try{const d=await cloud(true,part);if(d.error)throw 0;toast('Cloud mein save ho gaya');return true}
+  try{const d=await cloud(true,part);if(d.error)throw 0;toast(d.v>=3?'Cloud mein save ho gaya':'⚠ Code.gs purana hai — phone/HOD save nahi honge. New version deploy karo',6000);return true}
   catch(e){toast('Cloud save nahi hua — internet check karo');return false}
 }
 function openApp(){$('lock').classList.add('hide');$('app').classList.remove('hide');drawRules();drawMaster()}
@@ -213,9 +216,9 @@ async function unlock(){
     try{
       const d=await cloud(false);
       if(d.error){$('perr').textContent='Galat PIN. Dobara try karo.';$('pin').value='';return}
-      if(d.timings&&d.timings.length){master={};d.timings.forEach(t=>{const m=toM(t.start);master[String(t.id).toUpperCase()]={name:t.name,start:m==null?'09:00':fm(m),grace:+t.grace||0,phone:t.phone||''}})}
+      if(d.timings&&d.timings.length){master={};d.timings.forEach(t=>{const m=toM(t.start);master[String(t.id).toUpperCase()]={name:t.name,start:m==null?'':fm(m),grace:+t.grace||0,phone:t.phone||(master[String(t.id).toUpperCase()]||{}).phone||''}})}
       if(d.rules){rules=d.rules;if(!rules.find(r=>r.key==='DEFAULT'))rules.unshift({key:'DEFAULT',start:'09:00',grace:15})}
-      if(d.hods)hods=d.hods;setStat('Cloud connected — data sabhi PC par same');openApp();
+      if(d.hods)hods=d.hods;setStat(d.v>=3?'Cloud connected — data sabhi PC par same':'⚠ Code.gs purana hai — phone/HOD sheet save nahi honge. Apps Script mein Deploy > Manage deployments > New version karo');openApp();
     }catch(e){$('perr').textContent='Cloud se connect nahi hua. Internet check karo.'}
     return;
   }
@@ -271,13 +274,24 @@ function mDownload(){
   const hs=XLSX.utils.aoa_to_sheet([['Department','HOD name','HOD phone'],...dd.map(k=>[k,(hods[k]||{}).name||'',(hods[k]||{}).phone||''])]);
   hs['!cols']=[{wch:14},{wch:24},{wch:16}];XLSX.utils.book_append_sheet(wb,hs,'HODs');XLSX.writeFile(wb,'Employee_Timings.xlsx');
 }
+function mcols(a){
+  for(const r of a){
+    const h=r.map(c=>String(c).toLowerCase().trim()),f=re=>h.findIndex(c=>re.test(c)),id=f(/ecode|e-code|emp.*code/),ph=f(/phone|mobile|contact|mob/),st=f(/start|timing/);
+    if(id>=0&&(ph>=0||st>=0))return{id,name:f(/name/),start:st,grace:f(/grace/),phone:ph};
+  }return null;
+}
 function mUpload(e){
   const f=e.target.files[0];if(!f)return;const rd=new FileReader();
   rd.onload=ev=>{try{
     const wb=XLSX.read(new Uint8Array(ev.target.result),{type:'array'}),a=grid(wb);let n=0,bad=0;
     if(wb.Sheets.HODs)grid(wb,'HODs').forEach(r=>{const k=String(r[0]).trim().toUpperCase();if(k&&k!=='DEPARTMENT')hods[k]={name:String(r[1]).trim(),phone:String(r[2]).trim()}});
-    a.forEach(r=>{const j=idCol(r);if(j<0)return;const m=timeOf(r[j+2]);if(m==null){bad++;return}
-      master[String(r[j]).trim().toUpperCase()]={name:String(r[j+1]).trim(),start:fm(m),grace:r[j+3]===''?15:(+r[j+3]||0),phone:String(r[j+4]??'').trim()};n++});
+    const cm=mcols(a);
+    a.forEach(r=>{
+      const j=cm?cm.id:idCol(r);if(j<0||!/^PF\//i.test(String(r[j]).trim()))return;
+      const g=(k,o)=>cm?(cm[k]>=0?r[cm[k]]:''):r[j+o],id=String(r[j]).trim().toUpperCase(),old=master[id]||{};
+      const m=timeOf(g('start',2)),gr=g('grace',3),ph=String(g('phone',4)??'').trim();
+      master[id]={name:String(g('name',1)??'').trim()||old.name||'',start:m==null?(old.start||''):fm(m),grace:(gr===''||gr==null)?(old.grace??15):(+gr||0),phone:ph||old.phone||''};n++;
+    });
     if(!n&&!wb.Sheets.HODs)return toast('Is file mein ECode aur start time nahi mile');
     mSave();
     toast(n+' employees ke timing save ho gaye'+(bad?' ('+bad+' rows mein time galat)':''));
@@ -306,6 +320,7 @@ function mClear(){if(confirm('Sabhi employee-wise timings hatane hain?')){master
 
 /* ---------- Read report ---------- */
 let rows=[],flt='all',meta='',sk='',sd=1,ch1,ch2,ch3;
+let days=LS('ap_days')||[],rsn=LS('ap_rs')||{};
 function load(e){
   const f=e.target.files[0];if(!f)return;$('fname').textContent=f.name;
   const rd=new FileReader();
@@ -321,6 +336,7 @@ function grid(wb,n){const ws=wb.Sheets[n||wb.SheetNames[0]],g=XLSX.utils.decode_
 const idCol=r=>r.findIndex(c=>/^PF\//i.test(String(c).trim()));
 function parse(wb){
   const a=grid(wb);
+  if(mcols(a)){toast('Ye master timing sheet lagti hai. Ise "Employee timings" mein "Upload master sheet" se daalo.',6000);return}
   const m=a.slice(0,6).flat().join(' ').match(/From\s+(\S+)\s+To\s+(\S+)/);
   meta=m?(m[1]===m[2]?m[1]:m[1]+' to '+m[2]):'';
   rows=[];
@@ -335,11 +351,12 @@ function parse(wb){
   $('dep').innerHTML='<option value="">All departments</option>'+ds.map(d=>`<option>${esc(d)}</option>`).join('');
   $('out').classList.remove('hide');draw();
   const c=rows.map(calc);hist({f:$('fname').textContent,d:meta,t:c.length,l:c.filter(r=>r.st==='late').length,a:c.filter(r=>r.st==='absent').length});
+  track(c.filter(r=>r.st==='late'),c.filter(r=>r.st==='absent').length,c.length);
 }
 
 /* ---------- Calculate ---------- */
 function calc(r){
-  let ru=master[r.id]||null,src='ECODE';
+  let ru=master[r.id]&&master[r.id].start?master[r.id]:null,src='ECODE';
   if(!ru){src='DEFAULT';for(const k of [r.dept+'/'+r.shift,r.shift,r.dept]){ru=rules.find(q=>q.key===k);if(ru){src=k;break}}}
   if(!ru)ru=rules.find(q=>q.key==='DEFAULT');
   const s=toM(ru.start);let st='absent',by=0;
@@ -359,7 +376,7 @@ function draw(){
   const q=$('q').value.toLowerCase().trim(),dp=$('dep').value;
   const v=all.filter(r=>(flt==='all'||r.st===flt)&&(!dp||r.dept===dp)&&(!q||r.id.toLowerCase().includes(q)||r.name.toLowerCase().includes(q)));
   if(sk)v.sort((a,b)=>{const g=r=>sk==='st'?(r.st==='absent'?-1:r.by):r[sk];const x=g(a),y=g(b);return(x>y?1:x<y?-1:0)*sd});
-  $('tb').innerHTML=v.length?v.map((r,i)=>`<tr class="in" style="animation-delay:${Math.min(i,15)*25}ms"><td>${i+1}</td><td>${esc(r.id)}</td><td>${esc(r.name)}</td><td>${esc(r.shift)}</td><td>${fm(r.s)}</td><td>${r.inM==null?'—':fm(r.inM)}</td><td class="${r.st==='late'?'late':r.st==='absent'?'abs':'ok'}">${label(r)}</td><td>${r.st==="ontime"?"":tel(pOf(r),pOf(r))}</td><td>${r.st==="ontime"?"":tel((hods[r.dept]||{}).phone,hOf(r))}</td></tr>`).join(''):'<tr><td colspan="9" class="sub" style="text-align:center;padding:30px">Kuch nahi mila</td></tr>';
+  $('tb').innerHTML=v.length?v.map((r,i)=>`<tr class="in" style="animation-delay:${Math.min(i,15)*25}ms"><td>${i+1}</td><td>${esc(r.id)}</td><td>${esc(r.name)}</td><td>${esc(r.shift)}</td><td>${fm(r.s)}</td><td>${r.inM==null?'—':fm(r.inM)}</td><td class="${r.st==='late'?'late':r.st==='absent'?'abs':'ok'}">${label(r)}</td><td>${tel(pOf(r),pOf(r))}${wlink(r)}</td><td>${tel((hods[r.dept]||{}).phone,hOf(r))}</td><td>${r.st==='ontime'?'':`<input value="${esc(rsn[rk(r.id)]||'')}" placeholder="Reason" style="width:150px" onchange="setR('${esc(r.id)}',this.value)">`}</td></tr>`).join(''):'<tr><td colspan="10" class="sub" style="text-align:center;padding:30px">Kuch nahi mila</td></tr>';
 }
 function srt(k){sd=sk===k?-sd:1;sk=k;draw()}
 function cnt(id,v){const e=$(id),t0=performance.now();(function f(t){const k=Math.min((t-t0)/700,1);e.textContent=Math.round(v*(1-Math.pow(1-k,3)));if(k<1)requestAnimationFrame(f)})(t0)}
@@ -418,13 +435,34 @@ function pdf(){
   for(let i=1;i<=n;i++){d.setPage(i);d.setFontSize(8);d.setTextColor(120);d.setFont('helvetica','normal');d.text('Crafted by Aditya Tomar - Attendance Pro',14,289);d.text('Page '+i+' of '+n,W-14,289,{align:'right'})}
   d.save('Attendance_'+(meta||'report').replace(/[\/ ]/g,'-')+'.pdf');
 }
+const rk=id=>(meta||new Date().toLocaleDateString('en-IN'))+'|'+id;
+function setR(id,v){rsn[rk(id)]=v.trim();const k=Object.keys(rsn);if(k.length>1500)delete rsn[k[0]];LS('ap_rs',rsn)}
+const wlink=r=>{let d=pOf(r).replace(/\D/g,'');if(!d)return'';if(d.length===10)d='91'+d;
+  const t=r.st==='absent'?`Namaste ${r.name}, aaj aap office nahi aaye. Kya karan tha?`:r.st==='late'?`Namaste ${r.name}, aaj aap ${lt(r.by)} late aaye. Kya karan tha?`:'';
+  return ' <a href="https://wa.me/'+d+(t?'?text='+encodeURIComponent(t):'')+'" target="_blank" title="WhatsApp">WA</a>'};
+function track(late,abs,tot){
+  const k=meta||new Date().toLocaleDateString('en-IN');
+  days=days.filter(x=>x.d!==k);days.unshift({d:k,l:late.map(r=>[r.id,r.name]),a:abs,t:tot});days=days.slice(0,31);LS('ap_days',days);repeat();
+}
+function repeat(){
+  const m={};days.forEach(x=>x.l.forEach(([id,n])=>{(m[id]=m[id]||{n,c:0}).c++}));
+  const t=Object.entries(m).filter(e=>e[1].c>=2).sort((a,b)=>b[1].c-a[1].c).slice(0,10);
+  $('rpN').textContent='(last '+days.length+' reports)';
+  $('rp').innerHTML=t.map(([id,x])=>`<div class="row" style="justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line)"><span>${esc(x.n)} <span class="sub">${esc(id)}</span></span><b class="late">${x.c} din late</b></div>`).join('')||'<span class="sub">Abhi koi repeat nahi. Kam se kam 2 din ki report upload karo.</span>';
+}
+function clearHist(){if(confirm('Recent uploads aur repeat latecomer ka data hatana hai?')){days=[];LS('ap_hist',[]);LS('ap_days',[]);hist();repeat();toast('History clear ho gayi')}}
+function clearReport(){rows=[];meta='';$('out').classList.add('hide');$('file').value='';$('fname').textContent='Biometric report upload karo';toast('Report hata di gayi')}
+function copyAbs(){
+  const a=rows.map(calc).filter(r=>r.st==='absent');
+  navigator.clipboard.writeText(`Absent list${meta?' — '+meta:''} (${a.length})\n\n`+a.map((r,i)=>`${i+1}. ${r.name} (${r.id})${hOf(r)?' — HOD: '+hOf(r):''}`).join('\n')).then(()=>toast('Absent list copy ho gayi'),()=>toast('Copy nahi hua'));
+}
 function setF(b){flt=b.dataset.f;document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c===b));draw()}
 
 /* ---------- Export ---------- */
 function dl(fmt){
-  const d=[['ECode','Name','Department','Shift','Shift start','In time','Status','Phone','HOD']];
-  rows.map(calc).forEach(r=>d.push([r.id,r.name,r.dept,r.shift,fm(r.s),r.inM==null?'':fm(r.inM),label(r),pOf(r),hOf(r)]));
-  const ws=XLSX.utils.aoa_to_sheet(d);ws['!cols']=[{wch:14},{wch:28},{wch:12},{wch:8},{wch:11},{wch:9},{wch:14},{wch:16},{wch:28}];
+  const d=[['ECode','Name','Department','Shift','Shift start','In time','Status','Phone','HOD','Reason']];
+  rows.map(calc).forEach(r=>d.push([r.id,r.name,r.dept,r.shift,fm(r.s),r.inM==null?'':fm(r.inM),label(r),pOf(r),hOf(r),rsn[rk(r.id)]||'']));
+  const ws=XLSX.utils.aoa_to_sheet(d);ws['!cols']=[{wch:14},{wch:28},{wch:12},{wch:8},{wch:11},{wch:9},{wch:14},{wch:16},{wch:28},{wch:30}];
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Attendance');
   const n='Attendance_'+(meta||new Date().toISOString().slice(0,10)).replace(/[\/ ]/g,'-');
   XLSX.writeFile(wb,n+'.'+fmt,{bookType:fmt});
@@ -438,6 +476,7 @@ function lateText(){
 function copyLate(){navigator.clipboard.writeText(lateText()).then(()=>toast('Late list copy ho gayi'),()=>toast('Copy nahi hua'))}
 function wa(){window.open('https://wa.me/?text='+encodeURIComponent(lateText()),'_blank')}
 
-drawRules();mcount();hist();
+drawRules();mcount();hist();repeat();
+document.addEventListener('keydown',e=>{if(e.key==='/'&&rows.length&&!/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)){e.preventDefault();$('q').focus()}});
 if(LS('ap_theme')==='dark'){document.documentElement.dataset.theme='dark';$('tbtn').textContent='Light'}
 </script></body></html>
