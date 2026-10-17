@@ -108,6 +108,7 @@ a{color:var(--acc);text-decoration:none;font-weight:500}a:hover{text-decoration:
       <button onclick="mAddMissing()">Add missing from report</button>
       <button onclick="mAdd()">+ Add employee</button>
       <button onclick="mSwap()">Swap Day ↔ Night</button>
+      <button onclick="mFloor()">Set floor for shown</button>
       <select id="mf" onchange="drawMaster()"><option value="">All</option><option value="N">Night only</option><option value="D">Day only (EMB)</option></select>
     </div>
     <div class="row">
@@ -116,10 +117,11 @@ a{color:var(--acc);text-decoration:none;font-weight:500}a:hover{text-decoration:
       <input type="file" id="mfile" accept=".xls,.xlsx,.csv" class="hide" onchange="mUpload(event)">
       <button onclick="mClear()">Clear all</button>
     </div>
-    <div class="scroll" style="margin-top:12px;max-height:420px"><table><thead><tr><th>ECode</th><th>Name</th><th>Dept</th><th>Day/Night</th><th>Start</th><th>Grace</th><th>Phone</th><th></th></tr></thead><tbody id="mbody"></tbody></table></div>
+    <div class="scroll" style="margin-top:12px;max-height:420px"><table><thead><tr><th>ECode</th><th>Name</th><th>Dept</th><th>Day/Night</th><th>Floor</th><th>Start</th><th>Grace</th><th>Phone</th><th></th></tr></thead><tbody id="mbody"></tbody></table></div>
     <h2 style="margin-top:20px">Department HODs</h2>
-    <p class="hint">Har department ke HOD ka naam aur number. Badalne ke baad upar "Save employee timings" dabao. Late/absent wali table mein yahi dikhega.</p>
-    <div class="scroll" style="max-height:300px"><table><thead><tr><th>Department</th><th>HOD name</th><th>HOD phone</th></tr></thead><tbody id="hbody"></tbody></table></div>
+    <p class="hint">Ek department ke 2-3 HOD jod sakte ho. Har HOD ke saath floor aur shift (Day/Night/Both) likho. Employee ke floor aur shift ke hisaab se tool khud sahi HOD chunta hai. Badalne ke baad upar "Save employee timings" dabao.</p>
+    <div class="row" style="margin-bottom:8px"><button onclick="hAdd()">+ Add HOD</button></div>
+    <div class="scroll" style="max-height:300px"><table><thead><tr><th>Dept</th><th>HOD name</th><th>HOD phone</th><th>Floor</th><th>Shift</th><th></th></tr></thead><tbody id="hbody"></tbody></table></div>
   </div>
 
   <div class="box hide" id="pinBox">
@@ -191,7 +193,7 @@ a{color:var(--acc);text-decoration:none;font-weight:500}a:hover{text-decoration:
 
 <script>
 // Google Apps Script web app URL yahan paste karo (setup ke baad). Khali rahe to data sirf is browser mein save hoga.
-const CLOUD_URL='https://script.google.com/macros/s/AKfycbwo4JxHbdxeNCsB89ytPU5K52HPxZT66nDoRvRW-5nIJKzFQ1YLqC8Xuc7t6LKC5NDB/exec';
+const CLOUD_URL='';
 const NIGHT_DEPTS=['EMB'];   // sirf in departments mein Night shift chalta hai
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -211,7 +213,7 @@ async function cloud(post,body){
 }
 async function cloudSave(part){
   if(!CLOUD_URL)return true;
-  try{const d=await cloud(true,part);if(d.error)throw 0;toast(d.v>=4?'Cloud mein save ho gaya':'⚠ Code.gs purana hai — phone/HOD save nahi honge. New version deploy karo',6000);return true}
+  try{const d=await cloud(true,part);if(d.error)throw 0;toast(d.v>=5?'Cloud mein save ho gaya':'⚠ Code.gs purana hai — phone/HOD save nahi honge. New version deploy karo',6000);return true}
   catch(e){toast('Cloud save nahi hua — internet check karo');return false}
 }
 function openApp(){$('lock').classList.add('hide');$('app').classList.remove('hide');drawRules();drawMaster()}
@@ -222,9 +224,9 @@ async function unlock(){
     try{
       const d=await cloud(false);
       if(d.error){$('perr').textContent='Galat PIN. Dobara try karo.';$('pin').value='';return}
-      if(d.timings&&d.timings.length){master={};d.timings.forEach(t=>{const m=toM(t.start);master[String(t.id).toUpperCase()]={name:t.name,start:m==null?'':fm(m),grace:+t.grace||0,phone:t.phone||(master[String(t.id).toUpperCase()]||{}).phone||'',night:!!t.night}})}
+      if(d.timings&&d.timings.length){master={};d.timings.forEach(t=>{const m=toM(t.start);master[String(t.id).toUpperCase()]={name:t.name,start:m==null?'':fm(m),grace:+t.grace||0,phone:t.phone||(master[String(t.id).toUpperCase()]||{}).phone||'',night:!!t.night,floor:t.floor||''}})}
       if(d.rules){rules=d.rules;if(!rules.find(r=>r.key==='DEFAULT'))rules.unshift({key:'DEFAULT',start:'09:00',grace:15})}
-      if(d.hods)hods=d.hods;setStat(d.v>=4?'Cloud connected — data sabhi PC par same':'⚠ Code.gs purana hai — phone/HOD sheet save nahi honge. Apps Script mein Deploy > Manage deployments > New version karo');openApp();
+      if(d.hods)hods=normHods(d.hods);setStat(d.v>=5?'Cloud connected — data sabhi PC par same':'⚠ Code.gs purana hai — phone/HOD sheet save nahi honge. Apps Script mein Deploy > Manage deployments > New version karo');openApp();
     }catch(e){$('perr').textContent='Cloud se connect nahi hua. Internet check karo.'}
     return;
   }
@@ -259,45 +261,64 @@ function saveRules(){
 function resetRules(){if(confirm('Starting values wapas lagani hain?')){rules=mk();drawRules()}}
 
 /* ---------- Employee-wise timings (saved in this browser) ---------- */
-let master=LS('ap_master')||{},hods=LS('ap_hods')||{};
+let master=LS('ap_master')||{},hods=normHods(LS('ap_hods'));
 const pOf=r=>(master[r.id]||{}).phone||'';
 const dn=id=>(master[id]||{}).night?'Night':'Day';
-const hOf=r=>{const h=hods[r.dept]||{};return [h.name,h.phone].filter(Boolean).join(' · ')};
+function normHods(x){
+  if(Array.isArray(x))return x.map(h=>({dept:String(h.dept||'').toUpperCase(),name:h.name||'',phone:h.phone||'',floor:h.floor||'',shift:h.shift||''}));
+  return Object.entries(x||{}).map(([d,h])=>({dept:d.toUpperCase(),name:h.name||'',phone:h.phone||'',floor:'',shift:''}));
+}
+const fn=v=>String(v||'').toLowerCase().replace(/floor|flr|fl\.?/g,'').replace(/(\d)(st|nd|rd|th)/g,'$1').replace(/\s+/g,'');
+function hodsFor(r){   // HOD = same department + same floor + same shift (day/night) as the employee
+  const e=master[r.id]||{},ef=fn(e.floor),sh=r.night?'N':'D';let best=[],bs=-99;
+  hods.forEach(h=>{
+    if(h.dept!==r.dept||(!h.name&&!h.phone))return;
+    const hf=fn(h.floor),sc=(hf&&ef?(hf===ef?4:-4):0)+(h.shift?(h.shift===sh?2:-2):0);
+    if(sc>bs){bs=sc;best=[h]}else if(sc===bs)best.push(h);
+  });
+  return best;
+}
+const hOf=r=>hodsFor(r).map(h=>[h.name,h.phone].filter(Boolean).join(' · ')).join(' / ');
+const hodCell=r=>hodsFor(r).map(h=>h.phone?tel(h.phone,(h.name||'HOD')+' · '+h.phone):esc(h.name||'HOD')).join('<br>')||'<span class="sub">—</span>';
 const tel=(n,t)=>{const d=String(n||'').replace(/[^\d+]/g,'');return d?`<a href="tel:${d}">${esc(t)}</a>`:'<span class="sub">—</span>'};
 function drawHods(){
-  const ds=[...new Set([...Object.keys(hods),...rows.map(r=>r.dept),...Object.keys(master).map(k=>k.split('/')[1]||'')])].filter(Boolean).sort();
-  $('hbody').innerHTML=ds.map(k=>{const h=hods[k]||{},e=esc(k);return `<tr><td>${e}</td><td><input value="${esc(h.name)}" placeholder="HOD name" onchange="hSet('${e}','name',this.value)"></td><td><input type="tel" value="${esc(h.phone)}" placeholder="Phone" style="width:130px" onchange="hSet('${e}','phone',this.value)"></td></tr>`}).join('')||'<tr><td colspan="3" class="sub">Report upload karne par departments yahan aa jayenge.</td></tr>';
+  const sel=(h,i)=>[['','Both'],['D','Day'],['N','Night']].map(([v,t])=>`<option value="${v}"${h.shift===v?' selected':''}>${t}</option>`).join('');
+  $('hbody').innerHTML=hods.map((h,i)=>`<tr><td><input value="${esc(h.dept)}" placeholder="EMB" style="width:70px" onchange="hSet(${i},'dept',this.value.toUpperCase())"></td><td><input value="${esc(h.name)}" placeholder="HOD name" onchange="hSet(${i},'name',this.value)"></td><td><input type="tel" value="${esc(h.phone)}" placeholder="Phone" style="width:130px" onchange="hSet(${i},'phone',this.value)"></td><td><input value="${esc(h.floor)}" placeholder="2" style="width:70px" onchange="hSet(${i},'floor',this.value)"></td><td><select onchange="hSet(${i},'shift',this.value)">${sel(h,i)}</select></td><td><button class="x" onclick="hDel(${i})">✕</button></td></tr>`).join('')||'<tr><td colspan="6" class="sub">Abhi koi HOD nahi. "+ Add HOD" dabao.</td></tr>';
 }
-function hSet(k,f,v){(hods[k]=hods[k]||{})[f]=v.trim()}
+function hSet(i,f,v){hods[i][f]=v.trim()}
+function hDel(i){hods.splice(i,1);drawHods()}
+function hAdd(){hods.push({dept:'',name:'',phone:'',floor:'',shift:''});drawHods()}
 const mcount=()=>{$('mcount').textContent=Object.keys(master).length+' employees saved · '+Object.values(master).filter(m=>m.night).length+' night'};
 function mDownload(){
-  const list=rows.length?rows.map(calc).map(r=>[r.id,r.name,r.dept,dn(r.id),fm(r.s),r.grace,pOf(r)]):Object.entries(master).map(([id,m])=>[id,m.name||'',id.split('/')[1]||'',dn(id),m.start,m.grace,m.phone||'']);
+  const list=rows.length?rows.map(calc).map(r=>[r.id,r.name,r.dept,dn(r.id),fm(r.s),r.grace,pOf(r),(master[r.id]||{}).floor||'']):Object.entries(master).map(([id,m])=>[id,m.name||'',id.split('/')[1]||'',dn(id),m.start,m.grace,m.phone||'',m.floor||'']);
   if(!list.length)return toast('Pehle ek report upload karo, phir master sheet download karo');
   list.sort((a,b)=>a[0].localeCompare(b[0]));
-  const ws=XLSX.utils.aoa_to_sheet([['ECode','Name','Department','Day/Night','Start time (HH:MM)','Grace (min)','Phone'],...list]);
-  ws['!cols']=[{wch:14},{wch:28},{wch:12},{wch:11},{wch:18},{wch:12},{wch:16}];
+  const ws=XLSX.utils.aoa_to_sheet([['ECode','Name','Department','Day/Night','Start time (HH:MM)','Grace (min)','Phone','Floor'],...list]);
+  ws['!cols']=[{wch:14},{wch:28},{wch:12},{wch:11},{wch:18},{wch:12},{wch:16},{wch:8}];
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Timings');
-  const dd=[...new Set([...Object.keys(hods),...rows.map(r=>r.dept)])].sort();
-  const hs=XLSX.utils.aoa_to_sheet([['Department','HOD name','HOD phone'],...dd.map(k=>[k,(hods[k]||{}).name||'',(hods[k]||{}).phone||''])]);
-  hs['!cols']=[{wch:14},{wch:24},{wch:16}];XLSX.utils.book_append_sheet(wb,hs,'HODs');XLSX.writeFile(wb,'Employee_Timings.xlsx');
+  const hl=hods.length?hods:[...new Set(rows.map(r=>r.dept))].sort().map(d=>({dept:d,name:'',phone:'',floor:'',shift:''}));
+  const hs=XLSX.utils.aoa_to_sheet([['Department','HOD name','HOD phone','Floor','Shift (Day/Night/Both)'],...hl.map(h=>[h.dept,h.name,h.phone,h.floor,h.shift==='D'?'Day':h.shift==='N'?'Night':'Both'])]);
+  hs['!cols']=[{wch:14},{wch:24},{wch:16},{wch:8},{wch:22}];XLSX.utils.book_append_sheet(wb,hs,'HODs');XLSX.writeFile(wb,'Employee_Timings.xlsx');
 }
 function mcols(a){
   for(const r of a){
     const h=r.map(c=>String(c).toLowerCase().trim()),f=re=>h.findIndex(c=>re.test(c)),id=f(/ecode|e-code|emp.*code/),ph=f(/phone|mobile|contact|mob/),st=f(/start|timing/);
-    if(id>=0&&(ph>=0||st>=0))return{id,name:f(/name/),start:st,grace:f(/grace/),phone:ph,dn:f(/day.*night|night|shift type/)};
+    if(id>=0&&(ph>=0||st>=0))return{id,name:f(/name/),start:st,grace:f(/grace/),phone:ph,dn:f(/day.*night|night|shift type/),floor:f(/floor/)};
   }return null;
 }
 function mUpload(e){
   const f=e.target.files[0];if(!f)return;const rd=new FileReader();
   rd.onload=ev=>{try{
     const wb=XLSX.read(new Uint8Array(ev.target.result),{type:'array'}),a=grid(wb);let n=0,bad=0;
-    if(wb.Sheets.HODs)grid(wb,'HODs').forEach(r=>{const k=String(r[0]).trim().toUpperCase();if(k&&k!=='DEPARTMENT')hods[k]={name:String(r[1]).trim(),phone:String(r[2]).trim()}});
+    if(wb.Sheets.HODs){const hl=[];grid(wb,'HODs').forEach(r=>{const k=String(r[0]).trim().toUpperCase(),sv=String(r[4]??'').trim().toUpperCase();
+      if(!k||k==='DEPARTMENT'||(!String(r[1]).trim()&&!String(r[2]).trim()))return;
+      hl.push({dept:k,name:String(r[1]).trim(),phone:String(r[2]).trim(),floor:String(r[3]??'').trim(),shift:/^N/.test(sv)?'N':/^D/.test(sv)?'D':''})});if(hl.length)hods=hl}
     const cm=mcols(a);
     a.forEach(r=>{
       const j=cm?cm.id:idCol(r);if(j<0||!/^PF\//i.test(String(r[j]).trim()))return;
       const g=(k,o)=>cm?(cm[k]>=0?r[cm[k]]:''):r[j+o],id=String(r[j]).trim().toUpperCase(),old=master[id]||{};
-      const m=timeOf(g('start',2)),gr=g('grace',3),ph=String(g('phone',4)??'').trim(),dn=String(g('dn',99)??'').trim().toUpperCase();
-      master[id]={name:String(g('name',1)??'').trim()||old.name||'',start:m==null?(old.start||''):fm(m),grace:(gr===''||gr==null)?(old.grace??15):(+gr||0),phone:ph||old.phone||'',night:dn?/^N/.test(dn):!!old.night};n++;
+      const m=timeOf(g('start',2)),gr=g('grace',3),ph=String(g('phone',4)??'').trim(),dn=String(g('dn',99)??'').trim().toUpperCase(),fl=String(g('floor',99)??'').trim();
+      master[id]={name:String(g('name',1)??'').trim()||old.name||'',start:m==null?(old.start||''):fm(m),grace:(gr===''||gr==null)?(old.grace??15):(+gr||0),phone:ph||old.phone||'',night:dn?/^N/.test(dn):!!old.night,floor:fl||old.floor||''};n++;
     });
     if(!n&&!wb.Sheets.HODs)return toast('Is file mein ECode aur start time nahi mile');
     mSave();
@@ -307,12 +328,12 @@ function mUpload(e){
 }
 function mSave(){
   LS('ap_master',master);LS('ap_hods',hods);drawMaster();if(rows.length)draw();
-  cloudSave({timings:Object.entries(master).map(([id,m])=>({id,name:m.name||'',start:m.start,grace:+m.grace||0,phone:m.phone||'',night:!!m.night})),hods});
+  cloudSave({timings:Object.entries(master).map(([id,m])=>({id,name:m.name||'',start:m.start,grace:+m.grace||0,phone:m.phone||'',night:!!m.night,floor:m.floor||''})),hods});
 }
 function drawMaster(){
   const q=($('mq').value||'').toLowerCase();
   const mf=$('mf').value,ids=Object.keys(master).sort().filter(id=>!mf||(mf==='N'?master[id].night:(!master[id].night&&NIGHT_DEPTS.includes(id.split('/')[1])))).filter(id=>!q||id.toLowerCase().includes(q)||(master[id].name||'').toLowerCase().includes(q));
-  $('mbody').innerHTML=ids.map(id=>{const m=master[id],e=esc(id),dp=id.split('/')[1]||'';return `<tr><td>${e}</td><td>${esc(m.name)}</td><td>${esc(dp)}</td><td>${NIGHT_DEPTS.includes(dp)?`<select onchange="mSet('${e}','night',this.value==='N')"><option value="D"${m.night?'':' selected'}>Day</option><option value="N"${m.night?' selected':''}>Night</option></select>`:'<span class="sub">—</span>'}</td><td><input type="time" value="${esc(m.start)}" onchange="mSet('${e}','start',this.value)"></td><td><input type="number" min="0" max="120" value="${+m.grace||0}" style="width:70px" onchange="mSet('${e}','grace',this.value)"></td><td><input type="tel" value="${esc(m.phone||'')}" placeholder="Phone" style="width:130px" onchange="mSet('${e}','phone',this.value)"></td><td><button class="x" onclick="mDel('${e}')">✕</button></td></tr>`}).join('')||'<tr><td colspan="5" class="sub">Abhi koi employee nahi. Report upload karke "Add missing from report" dabao.</td></tr>';
+  shown=ids;$('mbody').innerHTML=ids.map(id=>{const m=master[id],e=esc(id),dp=id.split('/')[1]||'';return `<tr><td>${e}</td><td>${esc(m.name)}</td><td>${esc(dp)}</td><td>${NIGHT_DEPTS.includes(dp)?`<select onchange="mSet('${e}','night',this.value==='N')"><option value="D"${m.night?'':' selected'}>Day</option><option value="N"${m.night?' selected':''}>Night</option></select>`:'<span class="sub">—</span>'}</td><td><input value="${esc(m.floor||'')}" placeholder="Floor" style="width:70px" onchange="mSet('${e}','floor',this.value)"></td><td><input type="time" value="${esc(m.start)}" onchange="mSet('${e}','start',this.value)"></td><td><input type="number" min="0" max="120" value="${+m.grace||0}" style="width:70px" onchange="mSet('${e}','grace',this.value)"></td><td><input type="tel" value="${esc(m.phone||'')}" placeholder="Phone" style="width:130px" onchange="mSet('${e}','phone',this.value)"></td><td><button class="x" onclick="mDel('${e}')">✕</button></td></tr>`}).join('')||'<tr><td colspan="5" class="sub">Abhi koi employee nahi. Report upload karke "Add missing from report" dabao.</td></tr>';
   mcount();drawHods();
 }
 function mSet(id,f,v){master[id][f]=f==='grace'?(+v||0):v}
@@ -322,6 +343,11 @@ function mAddMissing(){
   if(!rows.length)return toast('Pehle report upload karo');let n=0;
   rows.forEach(r=>{if(!master[r.id]){const c=calc(r);master[r.id]={name:r.name,start:fm(c.s),grace:c.grace};n++}});
   drawMaster();toast(n+' employees add hue — timing check karke Save dabao');
+}
+function mFloor(){
+  if(!shown.length)return toast('Pehle list mein employees dikhao (search/filter)');
+  const f=prompt('Dikhe hue '+shown.length+' employees ke liye floor likho (jaise 2). Khali chhodo to floor hat jayega');if(f===null)return;
+  shown.forEach(id=>{master[id].floor=f.trim()});drawMaster();toast('Floor set hua — "Save employee timings" dabao');
 }
 function mSwap(){
   const ids=Object.keys(master).filter(id=>NIGHT_DEPTS.includes(id.split('/')[1]));
@@ -333,7 +359,7 @@ function mClear(){if(confirm('Sabhi employee-wise timings hatane hain?')){master
 
 /* ---------- Read report ---------- */
 let rows=[],flt='all',meta='',sk='',sd=1,ch1,ch2,ch3;
-let days=LS('ap_days')||[],rsn=LS('ap_rs')||{};
+let days=LS('ap_days')||[],rsn=LS('ap_rs')||{},shown=[];
 function load(e){
   const f=e.target.files[0];if(!f)return;$('fname').textContent=f.name;
   const rd=new FileReader();
@@ -390,7 +416,7 @@ function draw(){
   const q=$('q').value.toLowerCase().trim(),dp=$('dep').value;
   const v=all.filter(r=>(flt==='all'||r.st===flt)&&(!dp||r.dept===dp)&&(!q||r.id.toLowerCase().includes(q)||r.name.toLowerCase().includes(q)));
   if(sk)v.sort((a,b)=>{const g=r=>sk==='st'?(r.st==='absent'?-1:r.by):r[sk];const x=g(a),y=g(b);return(x>y?1:x<y?-1:0)*sd});
-  $('tb').innerHTML=v.length?v.map((r,i)=>`<tr class="in" style="animation-delay:${Math.min(i,15)*25}ms"><td>${i+1}</td><td>${esc(r.id)}</td><td>${esc(r.name)}</td><td>${esc(r.shift)}</td><td>${fm(r.s)}</td><td>${r.inM==null?'—':fm(r.inM)}</td><td class="${r.st==='late'?'late':r.st==='absent'?'abs':r.st==='night'?'nt':'ok'}">${label(r)}</td><td>${tel(pOf(r),pOf(r))}${wlink(r)}</td><td>${tel((hods[r.dept]||{}).phone,hOf(r))}</td><td>${r.st==='ontime'||r.st==='night'?'':`<input value="${esc(rsn[rk(r.id)]||'')}" placeholder="Reason" style="width:150px" onchange="setR('${esc(r.id)}',this.value)">`}</td></tr>`).join(''):'<tr><td colspan="10" class="sub" style="text-align:center;padding:30px">Kuch nahi mila</td></tr>';
+  $('tb').innerHTML=v.length?v.map((r,i)=>`<tr class="in" style="animation-delay:${Math.min(i,15)*25}ms"><td>${i+1}</td><td>${esc(r.id)}</td><td>${esc(r.name)}</td><td>${esc(r.shift)}</td><td>${fm(r.s)}</td><td>${r.inM==null?'—':fm(r.inM)}</td><td class="${r.st==='late'?'late':r.st==='absent'?'abs':r.st==='night'?'nt':'ok'}">${label(r)}</td><td>${tel(pOf(r),pOf(r))}${wlink(r)}</td><td>${hodCell(r)}</td><td>${r.st==='ontime'||r.st==='night'?'':`<input value="${esc(rsn[rk(r.id)]||'')}" placeholder="Reason" style="width:150px" onchange="setR('${esc(r.id)}',this.value)">`}</td></tr>`).join(''):'<tr><td colspan="10" class="sub" style="text-align:center;padding:30px">Kuch nahi mila</td></tr>';
 }
 function srt(k){sd=sk===k?-sd:1;sk=k;draw()}
 function cnt(id,v){const e=$(id),t0=performance.now();(function f(t){const k=Math.min((t-t0)/700,1);e.textContent=Math.round(v*(1-Math.pow(1-k,3)));if(k<1)requestAnimationFrame(f)})(t0)}
