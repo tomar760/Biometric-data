@@ -102,6 +102,18 @@ a{color:var(--acc);text-decoration:none;font-weight:500}a:hover{text-decoration:
   <div class="box hide" id="mBox">
     <h2>Employee-wise timings</h2>
     <p class="hint">Har ECode ka apna timing. Yahin badlo aur "Save employee timings" dabao. Yeh timing shift/department rule se pehle lagta hai. <b id="mcount"></b></p>
+    <div class="card hide" id="pvBox" style="margin-bottom:12px;border-color:var(--acc)">
+      <h3>Upload preview — abhi kuch save nahi hua</h3>
+      <p class="hint" id="pvInfo"></p>
+      <div class="scroll" style="max-height:300px"><table><thead><tr><th></th><th>ECode / HOD</th><th>Name</th><th>Type</th><th>Details</th></tr></thead><tbody id="pvBody"></tbody></table></div>
+      <div class="row" style="margin-top:10px">
+        <button class="p" onclick="pvApply(false)">Sirf tick wale save karo</button>
+        <button onclick="pvApply(true)">Sabko update karo</button>
+        <button onclick="pvTick(true)">Sab tick</button>
+        <button onclick="pvTick(false)">Koi nahi</button>
+        <button onclick="pvCancel()">Cancel</button>
+      </div>
+    </div>
     <div class="row" style="margin-bottom:10px">
       <input id="mq" placeholder="Search ECode ya naam" oninput="drawMaster()" style="flex:1;min-width:160px">
       <button class="p" onclick="mSave()">Save employee timings</button>
@@ -300,25 +312,53 @@ function mcols(a){
     if(id>=0&&(ph>=0||st>=0))return{id,name:f(/^(?!.*hod).*name/),start:st,grace:f(/grace/),phone:ph,dn:f(/day.*night|night|shift type/),hn:f(/hod.*name/),hp:f(/hod.*(phone|mobile|contact|number)/)};
   }return null;
 }
+let pend=[],pvSame=0;
+const FL={name:'Naam',start:'Start',grace:'Grace',phone:'Phone',night:'Shift',hodName:'HOD',hodPhone:'HOD phone'};
+const nv=(k,x)=>k==='night'?(x.night?'Night':'Day'):k==='grace'?String(+x.grace||0):String(x[k]??'');
 function mUpload(e){
   const f=e.target.files[0];if(!f)return;const rd=new FileReader();
   rd.onload=ev=>{try{
-    const wb=XLSX.read(new Uint8Array(ev.target.result),{type:'array'}),a=grid(wb);let n=0,bad=0;
-    if(wb.Sheets.HODs){const hl=[];grid(wb,'HODs').forEach(r=>{const k=String(r[0]).trim().toUpperCase(),sv=String(r[4]??'').trim().toUpperCase();
-      if(!k||k==='DEPARTMENT'||(!String(r[1]).trim()&&!String(r[2]).trim()))return;
-      hl.push({dept:k,name:String(r[1]).trim(),phone:String(r[2]).trim(),floor:String(r[3]??'').trim(),shift:/^N/.test(sv)?'N':/^D/.test(sv)?'D':''})});if(hl.length)hods=hl}
-    const cm=mcols(a);
+    const wb=XLSX.read(new Uint8Array(ev.target.result),{type:'array'}),a=grid(wb),cm=mcols(a);
+    pend=[];pvSame=0;let seen=0;
     a.forEach(r=>{
       const j=cm?cm.id:idCol(r);if(j<0||!/^PF\//i.test(String(r[j]).trim()))return;
-      const g=(k,o)=>cm?(cm[k]>=0?r[cm[k]]:''):r[j+o],id=String(r[j]).trim().toUpperCase(),old=master[id]||{};
+      const g=(k,o)=>cm?(cm[k]>=0?r[cm[k]]:''):r[j+o],id=String(r[j]).trim().toUpperCase(),old=master[id],o=old||{};
       const m=timeOf(g('start',2)),gr=g('grace',3),ph=String(g('phone',4)??'').trim(),dn=String(g('dn',99)??'').trim().toUpperCase(),hn=String(g('hn',99)??'').trim(),hp=String(g('hp',99)??'').trim();
-      master[id]={name:String(g('name',1)??'').trim()||old.name||'',start:m==null?(old.start||''):fm(m),grace:(gr===''||gr==null)?(old.grace??15):(+gr||0),phone:ph||old.phone||'',night:dn?/^N/.test(dn):!!old.night,hodName:hn||old.hodName||'',hodPhone:hp||old.hodPhone||''};n++;
+      const nw={name:String(g('name',1)??'').trim()||o.name||'',start:m==null?(o.start||''):fm(m),grace:(gr===''||gr==null)?(o.grace??15):(+gr||0),phone:ph||o.phone||'',night:dn?/^N/.test(dn):!!o.night,hodName:hn||o.hodName||'',hodPhone:hp||o.hodPhone||''};
+      seen++;
+      if(!old){pend.push({kind:'emp',id,nw,type:'new',diff:[],on:true});return}
+      const diff=Object.keys(FL).filter(k=>nv(k,nw)!==nv(k,old)).map(k=>FL[k]+': '+(nv(k,old)||'—')+' → '+(nv(k,nw)||'—'));
+      diff.length?pend.push({kind:'emp',id,nw,old,type:'chg',diff,on:false}):pvSame++;
     });
-    if(!n&&!wb.Sheets.HODs)return toast('Is file mein ECode aur start time nahi mile');
-    mSave();
-    toast(n+' employees ke timing save ho gaye'+(bad?' ('+bad+' rows mein time galat)':''));
+    if(wb.Sheets.HODs)grid(wb,'HODs').forEach(r=>{
+      const dept=String(r[0]).trim().toUpperCase(),name=String(r[1]).trim(),phone=String(r[2]).trim();
+      if(!dept||dept==='DEPARTMENT'||(!name&&!phone))return;
+      const old=hods.find(h=>h.dept===dept&&h.name.toLowerCase()===name.toLowerCase()),nw={dept,name,phone,floor:'',shift:''};
+      if(!old)pend.push({kind:'hod',id:dept+' · '+name,nw,type:'new',diff:[],on:true});
+      else if(phone&&(old.phone||'')!==phone)pend.push({kind:'hod',id:dept+' · '+name,nw,old,type:'chg',diff:['Phone: '+(old.phone||'—')+' → '+phone],on:false});
+      else pvSame++;
+    });
+    if(!seen&&!pend.length&&!wb.Sheets.HODs)return toast('Is file mein ECode nahi mile');
+    if(!pend.length)return toast('Koi naya ya badla hua entry nahi — sab jaisa tha waisa hai ('+pvSame+' same)',5000);
+    drawPreview(true);
   }catch(x){toast('File padh nahi paya')}};
   rd.readAsArrayBuffer(f);e.target.value='';
+}
+function drawPreview(first){
+  const nn=pend.filter(p=>p.type==='new').length;
+  $('pvInfo').textContent='Naye: '+nn+' · Badle hue: '+(pend.length-nn)+' · Jaise ke taise: '+pvSame+'. Naye pehle se tick hain, badle hue nahi.';
+  $('pvBody').innerHTML=pend.map((p,i)=>`<tr><td><input type="checkbox" ${p.on?'checked':''} onchange="pend[${i}].on=this.checked"></td><td>${esc(p.id)}</td><td>${esc(p.nw.name)}</td><td class="${p.type==='new'?'ok':'late'}">${p.kind==='hod'?'HOD ':''}${p.type==='new'?'Naya':'Badla'}</td><td>${esc(p.type==='new'?[p.nw.phone,p.nw.start,p.nw.night?'Night':''].filter(Boolean).join(' · '):p.diff.join(' | '))}</td></tr>`).join('');
+  $('pvBox').classList.remove('hide');if(first)$('pvBox').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function pvTick(v){pend.forEach(p=>{p.on=v});drawPreview()}
+function pvCancel(){pend=[];$('pvBox').classList.add('hide');toast('Upload cancel — kuch nahi badla')}
+function pvApply(all){
+  let n=0;
+  pend.forEach(p=>{if(!(all||p.on))return;
+    if(p.kind==='emp')master[p.id]=p.nw;else if(p.type==='new')hods.push(p.nw);else Object.assign(p.old,p.nw);
+    n++});
+  if(!n)return toast('Kuch tick nahi kiya');
+  pend=[];$('pvBox').classList.add('hide');mSave();toast(n+' entries save ho gayi, baaki jaisa tha waisa hai',5000);
 }
 function mSave(){
   LS('ap_master',master);LS('ap_hods',hods);drawMaster();if(rows.length)draw();
